@@ -124,6 +124,8 @@ main = defaultMainWithOpts
              , testProperty "union sum"            prop_unionSum
              , testProperty "difference model"     prop_differenceModel
              , testProperty "intersection model"   prop_intersectionModel
+             , testProperty "intersectionWith model" prop_intersectionWithModel
+             , testProperty "intersectionWithKey model" prop_intersectionWithKeyModel
              , testProperty "fromAscList"          prop_ordered
              , testProperty "fromList then toList" prop_list
              , testProperty "toDescList"           prop_descList
@@ -396,12 +398,12 @@ test_intersection = intersection (fromList [(5, "a"), (3, "b")]) (fromList [(5, 
 
 
 test_intersectionWith :: Assertion
-test_intersectionWith = intersectionWith (++) (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) @?= singleton 5 "aA"
+test_intersectionWith = intersectionWith f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) @?= singleton 3 "b:B"
+  where f al ar = if al == "b" then Just (al ++ ":" ++ ar) else Nothing
 
 test_intersectionWithKey :: Assertion
-test_intersectionWithKey = intersectionWithKey f (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) @?= singleton 5 "5:a|A"
-  where
-    f k al ar = (show k) ++ ":" ++ al ++ "|" ++ ar
+test_intersectionWithKey = intersectionWithKey f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) @?= singleton 3 "3:b|B"
+  where f k al ar = if al == "b" then Just ((show k) ++ ":" ++ al ++ "|" ++ ar) else Nothing
 
 ----------------------------------------------------------------
 -- Traversal
@@ -740,6 +742,22 @@ prop_intersectionModel :: [(Int,Int)] -> [(Int,Int)] -> Bool
 prop_intersectionModel xs ys
   = sort (keys (intersection (fromListWith (+) xs) (fromListWith (+) ys)))
     == sort (nub ((List.intersect) (Prelude.map fst xs) (Prelude.map fst ys)))
+
+prop_intersectionWithModel :: [(Int,Int)] -> [(Int,Int)] -> Bool
+prop_intersectionWithModel xs ys
+  = toList (intersectionWith f (fromList xs') (fromList ys'))
+    == [(kx, v) | (kx, vx) <- List.sort xs', (ky, vy) <- ys', kx == ky, Just v <- [f vx vy]]
+    where xs' = List.nubBy ((==) `on` fst) xs
+          ys' = List.nubBy ((==) `on` fst) ys
+          f l r = if (l + r) `mod` 2 == 0 then Nothing else Just (min l r)
+
+prop_intersectionWithKeyModel :: [(Int,Int)] -> [(Int,Int)] -> Bool
+prop_intersectionWithKeyModel xs ys
+  = toList (intersectionWithKey f (fromList xs') (fromList ys'))
+    == [(kx, v) | (kx, vx) <- List.sort xs', (ky, vy) <- ys', kx == ky, Just v <- [f kx vx vy]]
+    where xs' = List.nubBy ((==) `on` fst) xs
+          ys' = List.nubBy ((==) `on` fst) ys
+          f k l r = if (k + l + r) `mod` 2 == 0 then Nothing else Just (min l r)
 
 ----------------------------------------------------------------
 

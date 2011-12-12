@@ -593,20 +593,27 @@ differenceWithKey _ t Nil       = t
   Intersection
 --------------------------------------------------------------------}
 
--- | /O(n+m)/. The intersection with a combining function.
+-- | /O(n+m)/. The intersection with a combining function. When two equal keys
+-- are encountered, the combining function is applied to both values.  If it
+-- returns 'Nothing', the element is discarded.  If it returns (@'Just' y@),
+-- the element is updated with a new value @y@.
 --
--- > intersectionWith (++) (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) == singleton 5 "aA"
+-- > let f al ar = if al == "b" then Just (al ++ ":" ++ ar) else Nothing
+-- > intersectionWith f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) == singleton 3 "b:B"
 
-intersectionWith :: (a -> b -> c) -> IntMap a -> IntMap b -> IntMap c
+intersectionWith :: (a -> b -> Maybe c) -> IntMap a -> IntMap b -> IntMap c
 intersectionWith f m1 m2
   = intersectionWithKey (\_ x y -> f x y) m1 m2
 
--- | /O(n+m)/. The intersection with a combining function.
+-- | /O(n+m)/. The intersection with a combining function. When two equal keys
+-- are encountered, the combining function is applied to the key and both
+-- values.  If it returns 'Nothing', the element is discarded.  If it returns
+-- (@'Just' y@), the element is updated with a new value @y@.
 --
--- > let f k al ar = (show k) ++ ":" ++ al ++ "|" ++ ar
--- > intersectionWithKey f (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) == singleton 5 "5:a|A"
+-- > let f k al ar = if al == "b" then Just ((show k) ++ ":" ++ al ++ "|" ++ ar) else Nothing
+-- > intersectionWithKey f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) == singleton 3 "3:b|B"
 
-intersectionWithKey :: (Key -> a -> b -> c) -> IntMap a -> IntMap b -> IntMap c
+intersectionWithKey :: (Key -> a -> b -> Maybe c) -> IntMap a -> IntMap b -> IntMap c
 intersectionWithKey f t1@(Bin p1 m1 l1 r1) t2@(Bin p2 m2 l2 r2)
   | shorter m1 m2  = intersection1
   | shorter m2 m1  = intersection2
@@ -622,12 +629,12 @@ intersectionWithKey f t1@(Bin p1 m1 l1 r1) t2@(Bin p2 m2 l2 r2)
                   | otherwise         = intersectionWithKey f t1 r2
 
 intersectionWithKey f (Tip k x) t2
-  = case lookup k t2 of
-      Just y  -> Tip k $! f k x y
+  = case lookup k t2 >>= (\y -> f k x y) of
+      Just y'  -> y' `seq` Tip k y'
       Nothing -> Nil
 intersectionWithKey f t1 (Tip k y)
-  = case lookup k t1 of
-      Just x  -> Tip k $! f k x y
+  = case lookup k t1 >>= (\x -> f k x y) of
+      Just x'  -> x' `seq` Tip k x'
       Nothing -> Nil
 intersectionWithKey _ Nil _ = Nil
 intersectionWithKey _ _ Nil = Nil

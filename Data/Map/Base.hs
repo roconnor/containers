@@ -1189,47 +1189,60 @@ hedgeDiffWithKey f blo bhi t (Bin _ kx x l r)
 -- > intersection (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) == singleton 5 "a"
 
 intersection :: Ord k => Map k a -> Map k b -> Map k a
-intersection m1 m2
-  = intersectionWithKey (\_ x _ -> x) m1 m2
+intersection Tip _ = Tip
+intersection _ Tip = Tip
+intersection t1@(Bin s1 k1 x1 l1 r1) t2@(Bin s2 k2 _ l2 r2) =
+   if s1 >= s2 then
+     case splitLookupWithKey k2 t1 of
+       (lt, Just (k, x), gt) -> join k x (intersection lt l2) (intersection gt r2)
+       (lt, Nothing, gt) -> merge (intersection lt l2) (intersection gt r2)
+   else
+      case splitLookup k1 t2 of
+        (lt, Just _, gt) -> join k1 x1 (intersection l1 lt) (intersection r1 gt)
+        (lt, Nothing, gt) -> merge (intersection l1 lt) (intersection r1 gt)
 #if __GLASGOW_HASKELL__ >= 700
 {-# INLINABLE intersection #-}
 #endif
 
--- | /O(n+m)/. Intersection with a combining function.
+-- | /O(n+m)/. The intersection with a combining function. When two equal keys
+-- are encountered, the combining function is applied to both values.  If it
+-- returns 'Nothing', the element is discarded.  If it returns (@'Just' y@),
+-- the element is updated with a new value @y@.
 --
--- > intersectionWith (++) (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) == singleton 5 "aA"
+-- > let f al ar = if al == "b" then Just (al ++ ":" ++ ar) else Nothing
+-- > intersectionWith f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) == singleton 3 "b:B"
 
-intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionWith :: Ord k => (a -> b -> Maybe c) -> Map k a -> Map k b -> Map k c
 intersectionWith f m1 m2
   = intersectionWithKey (\_ x y -> f x y) m1 m2
 #if __GLASGOW_HASKELL__ >= 700
 {-# INLINABLE intersectionWith #-}
 #endif
 
--- | /O(n+m)/. Intersection with a combining function.
--- Intersection is more efficient on (bigset \``intersection`\` smallset).
+-- | /O(n+m)/. The intersection with a combining function. When two equal keys
+-- are encountered, the combining function is applied to the key and both
+-- values.  If it returns 'Nothing', the element is discarded.  If it returns
+-- (@'Just' y@), the element is updated with a new value @y@.
 --
--- > let f k al ar = (show k) ++ ":" ++ al ++ "|" ++ ar
--- > intersectionWithKey f (fromList [(5, "a"), (3, "b")]) (fromList [(5, "A"), (7, "C")]) == singleton 5 "5:a|A"
+-- > let f k al ar = if al == "b" then Just ((show k) ++ ":" ++ al ++ "|" ++ ar) else Nothing
+-- > intersectionWithKey f (fromList [(5, "a"), (3, "b"), (1, "d")]) (fromList [(5, "A"), (3, "B"), (7, "C")]) == singleton 3 "3:b|B"
 
-
-intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionWithKey :: Ord k => (k -> a -> b -> Maybe c) -> Map k a -> Map k b -> Map k c
 intersectionWithKey _ Tip _ = Tip
 intersectionWithKey _ _ Tip = Tip
 intersectionWithKey f t1@(Bin s1 k1 x1 l1 r1) t2@(Bin s2 k2 x2 l2 r2) =
    if s1 >= s2 then
-      let (lt,found,gt) = splitLookupWithKey k2 t1
-          tl            = intersectionWithKey f lt l2
-          tr            = intersectionWithKey f gt r2
-      in case found of
-      Just (k,x) -> join k (f k x x2) tl tr
-      Nothing -> merge tl tr
-   else let (lt,found,gt) = splitLookup k1 t2
-            tl            = intersectionWithKey f l1 lt
-            tr            = intersectionWithKey f r1 gt
-      in case found of
-      Just x -> join k1 (f k1 x1 x) tl tr
-      Nothing -> merge tl tr
+     case splitLookupWithKey k2 t1 of
+       (lt, Just (k, x), gt) -> case f k x x2 of
+                                  Just x' -> join k x' (intersectionWithKey f lt l2) (intersectionWithKey f gt r2)
+                                  Nothing -> merge (intersectionWithKey f lt l2) (intersectionWithKey f gt r2)
+       (lt, Nothing, gt) -> merge (intersectionWithKey f lt l2) (intersectionWithKey f gt r2)
+   else
+      case splitLookup k1 t2 of
+        (lt, Just x, gt) -> case f k1 x1 x of
+                                  Just x' -> join k1 x' (intersectionWithKey f l1 lt) (intersectionWithKey f r1 gt)
+                                  Nothing -> merge (intersectionWithKey f l1 lt) (intersectionWithKey f r1 gt)
+        (lt, Nothing, gt) -> merge (intersectionWithKey f l1 lt) (intersectionWithKey f r1 gt)
 #if __GLASGOW_HASKELL__ >= 700
 {-# INLINABLE intersectionWithKey #-}
 #endif
