@@ -361,16 +361,7 @@ notMember k m = not $ member k m
 
 -- | /O(min(n,W))/. Lookup the value at a key in the map. See also 'Data.Map.lookup'.
 lookup :: Key -> IntMap a -> Maybe a
-lookup k = k `seq` go
-  where
-    go (Bin _ m l r)
-      | zero k m  = go l
-      | otherwise = go r
-    go (Tip kx x)
-      | k == kx   = Just x
-      | otherwise = Nothing
-    go Nil      = Nothing
-
+lookup k t = fastLens k t (\_ _ -> Just) (\_ _ -> Nothing)
 
 find :: Key -> IntMap a -> a
 find k m
@@ -425,16 +416,7 @@ singleton k x
 -- > insert 5 'x' empty                         == singleton 5 'x'
 
 insert :: Key -> a -> IntMap a -> IntMap a
-insert k x t = k `seq`
-  case t of
-    Bin p m l r
-      | nomatch k p m -> join k (Tip k x) p t
-      | zero k m      -> Bin p m (insert k x l) r
-      | otherwise     -> Bin p m l (insert k x r)
-    Tip ky _
-      | k==ky         -> Tip k x
-      | otherwise     -> join k (Tip k x) ky t
-    Nil -> Tip k x
+insert k x t = fastLens k t (\_ it _ -> it x) (\_ it -> it x)
 
 -- right-biased insertion, used by 'union'
 -- | /O(min(n,W))/. Insert with a combining function.
@@ -514,16 +496,7 @@ insertLookupWithKey f k x t = k `seq`
 -- > delete 5 empty                         == empty
 
 delete :: Key -> IntMap a -> IntMap a
-delete k t = k `seq`
-  case t of
-    Bin p m l r
-      | nomatch k p m -> t
-      | zero k m      -> bin p m (delete k l) r
-      | otherwise     -> bin p m l (delete k r)
-    Tip ky _
-      | k==ky         -> Nil
-      | otherwise     -> t
-    Nil -> Nil
+delete k t = fastLens k t (\dt _ _ -> dt) (\dt _ -> dt)
 
 -- | /O(min(n,W))/. Adjust a value at a specific key. When the key is not
 -- a member of the map, the original map is returned.
@@ -558,8 +531,7 @@ adjustWithKey f
 -- > update f 3 (fromList [(5,"a"), (3,"b")]) == singleton 5 "a"
 
 update ::  (a -> Maybe a) -> Key -> IntMap a -> IntMap a
-update f
-  = updateWithKey (\_ x -> f x)
+update f k t = fastLens k t (\dt it x -> maybe dt it (f x)) (\dt _ -> dt)
 
 -- | /O(min(n,W))/. The expression (@'update' f k map@) updates the value @x@
 -- at @k@ (if it is in the map). If (@f k x@) is 'Nothing', the element is
@@ -614,25 +586,27 @@ updateLookupWithKey f k t = k `seq`
 -- 'alter' can be used to insert, delete, or update a value in an 'IntMap'.
 -- In short : @'lookup' k ('alter' f k m) = f ('lookup' k m)@.
 alter :: (Maybe a -> Maybe a) -> Key -> IntMap a -> IntMap a
-alter f k t = k `seq`
-  case t of
-    Bin p m l r
-      | nomatch k p m -> case f Nothing of
-                           Nothing -> t
-                           Just x -> join k (Tip k x) p t
-      | zero k m      -> bin p m (alter f k l) r
-      | otherwise     -> bin p m l (alter f k r)
-    Tip ky y
-      | k==ky         -> case f (Just y) of
-                           Just x -> Tip ky x
-                           Nothing -> Nil
-      | otherwise     -> case f Nothing of
-                           Just x -> join k (Tip k x) ky t
-                           Nothing -> Tip ky y
-    Nil               -> case f Nothing of
-                           Just x -> Tip k x
-                           Nothing -> Nil
+alter f k t = fastLens k t (\dt it x -> maybe dt it (f (Just x)))
+                           (\dt it   -> maybe dt it (f Nothing))
 
+lens :: Key -> IntMap a -> (Maybe a -> IntMap a, Maybe a)
+lens k t = fastLens k t (\dt it x -> (maybe dt it,Just x))
+                        (\dt it -> (maybe dt it,Nothing))
+
+fastLens :: Key -> IntMap a -> (IntMap a -> (a -> IntMap a) -> a -> c) -> (IntMap a -> (a -> IntMap a) -> c) -> c
+fastLens k = k `seq` go
+  where
+    go t@(Bin p m l r) c1 c2
+      | nomatch k p m = c2 t (\x -> join k (Tip k x) p t)
+      | zero k m      = go l (updateContL c1) (updateContL c2)
+      | otherwise     = go r (updateContR c1) (updateContR c2)
+     where
+      updateContL c dl il = c (bin p m dl r) (\x -> bin p m (il x) r)
+      updateContR c dr ir = c (bin p m l dr) (\x -> bin p m r (ir x))
+    go t@(Tip ky y) c1 c2
+      | k == ky   = c1 Nil (Tip ky) y
+      | otherwise = c2 t (\x -> join k (Tip k x) ky t)
+    go Nil _ c2   = c2 Nil (Tip k)
 
 {--------------------------------------------------------------------
   Union
